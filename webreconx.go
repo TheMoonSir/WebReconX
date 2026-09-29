@@ -218,18 +218,6 @@ func createNewRequest(method string, requestURL string, body io.Reader, headers 
 	return req, nil
 }
 
-/**
-For testing the IDOR vulnerabile
-We need to use cookie or try to use the authorization header
-
-[User 1] Attack another id if found or its will ask the client which one to attack and what type of varble is this
-
-
-Because some website use UUID or String or Number
-Then we need to check those that could've possible for vulnerabile
-
-
-**/
 
 func checktype(value string) string {
 	_, err := strconv.Atoi(value)
@@ -565,6 +553,10 @@ func IdorAttack(data map[string]any) (map[string]any, error) {
 
 	return result, nil
 }
+
+
+
+
 
 func init() {
 	File = flag.String("scan", "example.txt", "scan request you want and analaying if possible for bug.")
