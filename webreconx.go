@@ -39,8 +39,10 @@ import (
 	"strings"
 	"time"
 	"regexp"
+	"encoding/base64"
 
 	"github.com/golang-jwt/jwt/v5"
+	
 )
 
 var (
@@ -226,6 +228,7 @@ We need to use cookie or try to use the authorization header
 Because some website use UUID or String or Number
 Then we need to check those that could've possible for vulnerabile
 
+
 **/
 
 func checktype(value string) string {
@@ -233,6 +236,14 @@ func checktype(value string) string {
 	if err == nil {
 		return "number"
 	}
+
+	// Check if string is base64
+	// https://stackoverflow.com/questions/15334220/encode-decode-base64
+	d, err := base64.StdEncoding.DecodeString(value)
+	if err == nil && base64.StdEncoding.EncodeToString(d) == value {
+		return "base64"
+	}
+
 
 	// For all who wonder how would you check the string if he UUID 
 	// https://stackoverflow.com/questions/25051675/how-to-validate-uuid-v4-in-go
@@ -277,6 +288,8 @@ func createAttackID(value string) string {
 			return ""
 		}
 
+		println("number")
+
 		return strconv.Itoa(id + 1)
 	case "uuid":
 		id := []byte(value)
@@ -296,6 +309,22 @@ func createAttackID(value string) string {
 		}
 
 		return string(id)
+	case "base64":
+		d, err := base64.StdEncoding.DecodeString(value)
+		if err != nil {
+			return ""
+		}
+
+		decodevalue := string(d)
+
+		id , err := strconv.Atoi(decodevalue)
+		if err != nil {
+			return ""
+		}
+
+		modifie := strconv.Itoa(id + 1)
+
+		return base64.StdEncoding.EncodeToString([]byte(modifie))
 	case "string":
 		re := regexp.MustCompile(`^(.*?)(\d+)$`)
 		match := re.FindStringSubmatch(value)
@@ -307,23 +336,32 @@ func createAttackID(value string) string {
 			}
 		}
 
+
 		return value + "1"
 	}
 
 	return ""
 }
 
+// IDOR attack only basic.
+// Its support : base64, UUID v4, number, string
+// Target only: Path, Url Form, Body Form/Json
+
+// Target Payload curren: "id","user_id","ID","user_ID","uuid","document","user"
+
+
 func IdorAttack(data map[string]any) (map[string]any, error) {
 	result := map[string]any{}
 	result["Found"] = false
-	KnownCommon := []string{"id","user_id","ID","user_ID","uuid","document"}
+	KnownCommon := []string{"id","user_id","ID","user_ID","uuid","document","user"}
+	fmt.Printf("[!] The IDOR attack only scan - %v\n", KnownCommon)
 
 	if len(data) == 0 {
 		return result, errors.New("Invalid data")
 	}
 
-	Headers, err := data["Headers"].(map[string]string)
-	if !err {
+	Headers, ok := data["Headers"].(map[string]string)
+	if !ok {
 		return result, errors.New("Invalid Headers")
 	}
 
@@ -346,11 +384,10 @@ func IdorAttack(data map[string]any) (map[string]any, error) {
 		return result, errors.New("Invalid Method")
 	}
 
-	body, err := data["Data"].(map[string]any)
-	if !err {
+	body, ok := data["Data"].(map[string]any)
+	if !ok {
 		return result, errors.New("Invalid body")
 	}
-
 
 	DataType := data["DataType"].(string)
 	
@@ -363,6 +400,7 @@ func IdorAttack(data map[string]any) (map[string]any, error) {
 		}
 
 		MainID := fmt.Sprint(value)
+
 		AttackID := createAttackID(MainID)
 
 		if len(AttackID) == 0 {
@@ -406,8 +444,8 @@ func IdorAttack(data map[string]any) (map[string]any, error) {
 
 	// IDOR based path
 
-	Path, err := data["Path"].(string)
-	if !err {
+	Path, ok := data["Path"].(string)
+	if !ok {
 		return result, errors.New("Invalid Path")
 	}
 
@@ -464,6 +502,66 @@ func IdorAttack(data map[string]any) (map[string]any, error) {
 			}
 		}
 	}
+
+	// IDOR based Url form
+	q, err := url.Parse(Path)
+	if err != nil {
+		return result, err
+	}
+
+	query := q.Query()
+
+	for _, key := range KnownCommon {
+		values, exist := query[key]
+		if !exist {
+			continue
+		}
+
+		for i, value := range values {
+			MainID := fmt.Sprint(value)
+
+			AttackID := createAttackID(MainID)
+
+			if len(AttackID) == 0 {
+				continue
+			}
+
+			query[key][i] = AttackID
+
+			q.RawQuery = query.Encode()
+
+			requestURL := fmt.Sprintf("http://%v%s", Headers["Host"], q.RequestURI()) // for testing
+			//requestURL := fmt.Sprintf("https://%v%s", Headers["Host"]) // real target
+			req , err := createNewRequest(Method, requestURL, nil, Headers)
+
+			if err != nil {
+				return result, err
+			}
+
+			fmt.Printf("Main ID - %v\n", MainID)
+			fmt.Printf("Attack ID - %v\n", AttackID)
+
+			res, err := client.Do(req)
+
+			if err != nil {
+				return result, err
+			}
+
+			query[key][i] = MainID
+
+			q.RawQuery = query.Encode()
+
+			if res.StatusCode >= 200 {
+				result["Found"] = true
+				result["Payload"] = key
+				result["MainID"] = MainID
+				result["AttackID"] = AttackID
+				result["Status"] = res.StatusCode
+			}
+		}
+	}
+
+
 
 	return result, nil
 }
