@@ -1,29 +1,14 @@
+// WebReconX
+// Copyright (C) 2026 MoonLightLabs
+//
+// This program is free software: you can redistribute it and/or modify
+// it under the terms of the GNU General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+
+
 package main
 
-/**
-
-: Note for myself, new to golang :
-We can import mulit by doing import ("package","package/folder")
-For errors use package "errors" and on function you need to add func function() (string,error), you can return string,nil or string,errors.New("message")
-if we see a error "declared and not used: example" mean we didn't used it.
-:= operator is a shortcut for declaring and initializing a variable in one line
-
-strings.Contains is for finding inside something you want to looking for. but its will search if inside there for example "test"
-
-: Project :
-Our project is building a tool that would scan when input file for example "example.txt" and inside is:
-[HTTP Method] [Path]
-[Headers]
-
-[Data if exist]
-
-and check if could've any vuln exist.
-
-The reason is why i dont use python because its slower as fuck :break_heart:
-
-Sorry python.
-
-**/
 
 import (
 	"bytes"
@@ -406,27 +391,4 @@ func main() {
 	}
 
 	fmt.Printf("%v\n", xr)
-
-	/**
-
-	This will let us see what the body return, because we see hex :broken_heart:
-
-	var da map[string]any
-
-	bd, err := io.ReadAll(req.Body)
-	if err != nil {
-		fmt.Println(err)
-		return
-	}
-
-	errs := json.Unmarshal(bd, &da)
-	if errs != nil {
-		fmt.Println(err)
-		return
-	}
-
-
-	fmt.Println(da["wow"])
-	**/
-
 }	
