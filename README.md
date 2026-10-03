@@ -17,7 +17,7 @@ The project is licensed under the MIT License. Forks, modifications, and
 redistributions are permitted, provided that the original copyright and
 license notices are retained.
 
-[MIT License][License]
+[License][License]
 
 
 <!----------------------------------------------------------------------------->
