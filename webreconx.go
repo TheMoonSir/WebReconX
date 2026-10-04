@@ -367,6 +367,48 @@ func lfiAttack(data map[string]any) (map[string]any, error) {
 	return result, nil
 }
 
+func VulnerableScan(data map[string]any) (error) {
+	fmt.Println("Started vulnerable scan")
+
+	IdorResult, err := IdorAttack(data)
+	if err != nil {
+		fmt.Printf("[!] Error happen in [IdorAttack], msg: %s\n", err)
+		return err
+	}
+
+	if len(IdorResult) != 0 {
+		fmt.Printf("[!] Found IDOR vulnerable\n - Payload: %v\n - MainID: %v\n - AttackID: %v\n - Status: %v\n", IdorResult["Payload"],IdorResult["MainID"], IdorResult["AttackID"], IdorResult["Status"])
+	} else {
+		fmt.Println("[x] Didn't Found IDOR vulnerable")
+	}
+
+	SqliResult, err := sqliAttack(data)
+	if err != nil {
+		fmt.Printf("[!] Error happen in [sqliAttack], msg: %s\n", err)
+		return err
+	}
+
+	if len(SqliResult) != 0 {
+		fmt.Printf("[!] Found Sqli vulnerable\n - Payload: %v\n - MainID: %v\n - AttackID: %v\n - Status: %v\n", SqliResult["Payload"],SqliResult["MainID"], SqliResult["AttackID"], SqliResult["Status"])
+	} else {
+		fmt.Println("[x] Didn't Found Sqli vulnerable")
+	}
+
+	LFIResult, err := lfiAttack(data)
+	if err != nil {
+		fmt.Printf("[!] Error happen in [lfiAttack], msg: %s\n", err)
+		return err
+	}
+
+	if len(LFIResult) != 0 {
+		fmt.Printf("[!] Found LFI vulnerable\n - Payload: %v\n - MainID: %v\n - AttackID: %v\n - Status: %v\n", LFIResult["Payload"],LFIResult["MainID"], LFIResult["AttackID"], LFIResult["Status"])
+	} else {
+		fmt.Println("[x] Didn't Found LFI vulnerable")
+	}
+
+	return nil
+}
+
 func init() {
 	unit.File = flag.String("scan", "example.txt", "scan request you want and analaying if possible for bug.")
 }
@@ -381,14 +423,9 @@ func main() {
 		return
 	}
 
-	Headers := data["Headers"].(map[string]string)
-	fmt.Printf("Target: %v%s\n", Headers["Host"], data["Path"])
-
-	xr, err := IdorAttack(data)
+	err = VulnerableScan(data)
 	if err != nil {
-		fmt.Printf("Error happen in [IdorAttack], msg: %s", err)
+		fmt.Printf("Error happen in [VulnerableScan], msg: %s", err)
 		return
 	}
-
-	fmt.Printf("%v\n", xr)
 }	
